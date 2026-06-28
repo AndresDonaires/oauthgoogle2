@@ -84,20 +84,45 @@ class PerfilController extends Controller
 
     public function index(Request $request)
     {
+        // 1. Iniciamos la query cargando la relación 'usuario' para traer nombre y correo
+        // Además, filtramos mediante whereHas para asegurar que el perfil pertenezca a un MENTOR activo
+        $query = Perfil::with('usuario')
+            ->whereHas('usuario', function ($q) {
+                $q->where('rol', 2) // 1 = Estudiante, 2 = Mentor
+                  ->where('estado', 'activo');
+            });
 
-        $query = Perfil::query();
-
-        if ($request->has('carrera')) {
+        // 2. Lógica de Filtrado Dinámico (Criterios enviados desde el Frontend)
+        
+        // Filtrar por Carrera (Búsqueda parcial: 'like')
+        if ($request->has('carrera') && !empty($request->carrera)) {
             $query->where('carrera', 'like', '%' . $request->carrera . '%');
         }
 
-        if ($request->has('ciclo')) {
+        // Filtrar por Ciclo exacto
+        if ($request->has('ciclo') && !empty($request->ciclo)) {
             $query->where('ciclo', $request->ciclo);
         }
 
-        $perfiles = $query->paginate(5);
+        // Filtrar por Habilidades/Tecnologías (Búsqueda parcial: 'like')
+        if ($request->has('habilidad') && !empty($request->habilidad)) {
+            $query->where('habilidades', 'like', '%' . $request->habilidad . '%');
+        }
 
-        return response()->json($perfiles);
+        // 3. Lógica de Ordenamiento Dinámica
+$ordenarPor = $request->get('ordenar_por', 'fecha_actualizacion'); 
+$orden = $request->get('orden', 'desc'); 
+
+$camposPermitidos = ['ciclo', 'carrera', 'fecha_actualizacion', 'usuario_id'];
+$direccionesPermitidas = ['asc', 'desc'];
+
+if (in_array($ordenarPor, $camposPermitidos) && in_array(strtolower($orden), $direccionesPermitidas)) {
+    $query->orderBy($ordenarPor, $orden);
+}
+
+        // 4. Respuesta Estructurada y Paginada (5 elementos por página)
+        $mentores = $query->paginate(5);
+
+        return response()->json($mentores);
     }
-
 }
