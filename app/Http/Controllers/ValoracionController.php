@@ -33,6 +33,7 @@ class ValoracionController extends Controller
     // Registrar una valoración
     public function store(Request $request)
     {
+        try {
         $request->validate([
             'sesion_id' => 'required|exists:sesiones,id',
             'mentor_id' => 'required|exists:usuarios,id',
@@ -40,6 +41,13 @@ class ValoracionController extends Controller
             'calificacion' => 'required|integer|min:1|max:5',
             'comentario' => 'nullable|string|max:500'
         ]);
+    } catch (\Illuminate\Validation\ValidationException $e) {
+        // Esto te dirá exactamente qué campo falla
+        return response()->json([
+            'mensaje' => 'Error de validación',
+            'errores' => $e->errors()
+        ], 422);
+    }
 
         $sesion = Sesion::find($request->sesion_id);
 

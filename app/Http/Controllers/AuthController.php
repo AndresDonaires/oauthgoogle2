@@ -6,7 +6,7 @@ use Laravel\Socialite\Facades\Socialite;
 use App\Models\Usuario;
 use App\Models\Perfil; 
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Http\Request; // <-- IMPORTANTE: Añadimos la inyección de dependencias HTTP
+use Illuminate\Http\Request;
 use Exception;
 
 class AuthController extends Controller
