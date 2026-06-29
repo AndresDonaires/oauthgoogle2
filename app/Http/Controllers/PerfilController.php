@@ -87,24 +87,21 @@ class PerfilController extends Controller
         // 1. Iniciamos la query cargando la relación 'usuario' para traer nombre y correo
         // Además, filtramos mediante whereHas para asegurar que el perfil pertenezca a un MENTOR activo
         $query = Perfil::with('usuario')
+            ->withAvg('valoraciones', 'calificacion')
             ->whereHas('usuario', function ($q) {
                 $q->where('rol', 2) // 1 = Estudiante, 2 = Mentor
                   ->where('estado', 'activo');
             });
 
         // 2. Lógica de Filtrado Dinámico (Criterios enviados desde el Frontend)
-        
-        // Filtrar por Carrera (Búsqueda parcial: 'like')
         if ($request->has('carrera') && !empty($request->carrera)) {
             $query->where('carrera', 'like', '%' . $request->carrera . '%');
         }
 
-        // Filtrar por Ciclo exacto
         if ($request->has('ciclo') && !empty($request->ciclo)) {
             $query->where('ciclo', $request->ciclo);
         }
 
-        // Filtrar por Habilidades/Tecnologías (Búsqueda parcial: 'like')
         if ($request->has('habilidad') && !empty($request->habilidad)) {
             $query->where('habilidades', 'like', '%' . $request->habilidad . '%');
         }
@@ -113,7 +110,7 @@ class PerfilController extends Controller
 $ordenarPor = $request->get('ordenar_por', 'fecha_actualizacion'); 
 $orden = $request->get('orden', 'desc'); 
 
-$camposPermitidos = ['ciclo', 'carrera', 'fecha_actualizacion', 'usuario_id'];
+$camposPermitidos = ['ciclo', 'carrera', 'fecha_actualizacion', 'usuario_id', 'valoraciones_avg_calificacion'];
 $direccionesPermitidas = ['asc', 'desc'];
 
 if (in_array($ordenarPor, $camposPermitidos) && in_array(strtolower($orden), $direccionesPermitidas)) {
