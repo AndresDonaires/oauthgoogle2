@@ -7,15 +7,9 @@ use App\Http\Controllers\SesionController;
 use App\Http\Controllers\ValoracionController;
 
 // --- Rutas de Autenticación (KAN-16) ---
-// Redirige al usuario a la pantalla de login de Google
 Route::get('/auth/google/redirect', [AuthController::class, 'redirect']);
-
-// Google retorna aquí tras el login, procesamos el usuario y generamos la sesión
 Route::get('/auth/google/callback', [AuthController::class, 'callback']);
-
-// Endpoint para validar el token desde el frontend y obtener los datos del usuario
 Route::get('/usuario', [AuthController::class, 'usuario']);
-
 
 // --- Rutas de Perfiles (KAN-22) ---
 Route::get('/perfiles', [PerfilController::class, 'index']);
@@ -23,14 +17,12 @@ Route::get('/perfiles/{id}', [PerfilController::class, 'show']);
 Route::post('/perfiles', [PerfilController::class, 'store']);
 Route::put('/perfiles/{id}', [PerfilController::class, 'update']);
 
-
 // --- Rutas de Sesiones ---
 Route::get('/sesiones', [SesionController::class, 'index']);
 Route::get('/sesiones/{id}', [SesionController::class, 'show']);
 Route::post('/sesiones', [SesionController::class, 'store']);
 Route::put('/sesiones/{id}', [SesionController::class, 'update']);
 Route::put('/sesiones/{id}/cancelar', [SesionController::class, 'cancelar']);
-
 
 // --- Rutas de Valoraciones ---
 Route::get('/valoraciones', [ValoracionController::class, 'index']);
