@@ -8,12 +8,15 @@ use App\Models\Sesion;
 
 class ValoracionController extends Controller
 {
-    // Listar todas las valoraciones
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Valoracion::all()
-        );
+        $usuario = $request->attributes->get('usuario_auth');
+
+        $valoraciones = Valoracion::where('aprendiz_id', $usuario->id)
+            ->orWhere('mentor_id', $usuario->id)
+            ->get();
+
+        return response()->json($valoraciones);
     }
 
     // Consultar una valoración por ID
@@ -49,7 +52,13 @@ class ValoracionController extends Controller
         ], 422);
     }
 
-        $sesion = Sesion::find($request->sesion_id);
+        $usuario = $request->attributes->get('usuario_auth');
+        $sesion  = Sesion::find($request->sesion_id);
+
+        // Verificar que quien valora es el aprendiz de la sesión
+        if ($sesion->aprendiz_id !== $usuario->id) {
+            return response()->json(['mensaje' => 'Solo el aprendiz de la sesión puede registrar una valoración'], 403);
+        }
 
         if (
             $sesion->mentor_id != $request->mentor_id ||

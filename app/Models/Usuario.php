@@ -16,9 +16,12 @@ class Usuario extends Authenticatable
         'nombre',
         'email',
         'google_id',
+        'google_refresh_token',
         'rol',
         'estado'
     ];
+
+    protected $hidden = ['google_refresh_token'];
 
     public $timestamps = false;
 }

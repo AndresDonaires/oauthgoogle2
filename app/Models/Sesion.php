@@ -16,7 +16,8 @@ class Sesion extends Model
         'hora_inicio',
         'hora_fin',
         'estado',
-        'observaciones'
+        'observaciones',
+        'google_calendar_event_id',
     ];
 
     const CREATED_AT = 'fecha_creacion';

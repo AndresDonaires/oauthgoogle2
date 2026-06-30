@@ -22,18 +22,23 @@ class PerfilController extends Controller
 
     public function store(Request $request)
     {
+        $usuario = $request->attributes->get('usuario_auth');
+
         $request->validate([
-            'usuario_id' => 'required|integer|exists:usuarios,id|unique:perfiles,usuario_id',
-            'bio' => 'required|string|min:10|max:500',
-            'carrera' => 'required|string|min:3|max:100',
-            'ciclo' => 'required|integer|min:1|max:12',
-            'habilidades' => 'nullable|string|max:500',
+            'bio'          => 'required|string|min:10|max:500',
+            'carrera'      => 'required|string|min:3|max:100',
+            'ciclo'        => 'required|integer|min:1|max:12',
+            'habilidades'  => 'nullable|string|max:500',
             'disponibilidad' => 'nullable|string|max:255',
-            'foto_url' => 'nullable|url|max:255'
+            'foto_url'     => 'nullable|url|max:255'
         ]);
 
+        if (Perfil::where('usuario_id', $usuario->id)->exists()) {
+            return response()->json(['mensaje' => 'Ya tienes un perfil creado'], 409);
+        }
+
         $perfil = Perfil::create([
-            'usuario_id' => $request->usuario_id,
+            'usuario_id' => $usuario->id,
             'bio' => $request->bio,
             'carrera' => $request->carrera,
             'ciclo' => $request->ciclo,
@@ -50,21 +55,25 @@ class PerfilController extends Controller
 
     public function update(Request $request, $id)
     {
+        $usuario = $request->attributes->get('usuario_auth');
+
         $request->validate([
-            'bio' => 'required|string|min:10|max:500',
-            'carrera' => 'required|string|min:3|max:100',
-            'ciclo' => 'required|integer|min:1|max:12',
-            'habilidades' => 'nullable|string|max:500',
+            'bio'          => 'required|string|min:10|max:500',
+            'carrera'      => 'required|string|min:3|max:100',
+            'ciclo'        => 'required|integer|min:1|max:12',
+            'habilidades'  => 'nullable|string|max:500',
             'disponibilidad' => 'nullable|string|max:255',
-            'foto_url' => 'nullable|url|max:255'
+            'foto_url'     => 'nullable|url|max:255'
         ]);
-    
+
         $perfil = Perfil::where('usuario_id', $id)->first();
 
         if (!$perfil) {
-            return response()->json([
-                'mensaje' => 'Perfil no encontrado'
-            ], 404);
+            return response()->json(['mensaje' => 'Perfil no encontrado'], 404);
+        }
+
+        if ($perfil->usuario_id !== $usuario->id) {
+            return response()->json(['mensaje' => 'No puedes editar el perfil de otro usuario'], 403);
         }
 
         $perfil->update([

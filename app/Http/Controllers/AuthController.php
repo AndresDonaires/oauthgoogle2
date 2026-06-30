@@ -14,12 +14,8 @@ class AuthController extends Controller
     public function redirect()
     {
         return Socialite::driver('google')
-            ->scopes([
-                'openid',
-                'profile',
-                'email'
-            ])
-            ->stateless() 
+            ->scopes(['openid', 'profile', 'email'])
+            ->stateless()
             ->redirect();
     }
 
@@ -33,35 +29,40 @@ class AuthController extends Controller
                 $googleUser->getEmail()
             )->first();
 
+            $isNuevo = false;
+
             if (!$usuario) {
+                $isNuevo = true;
                 $usuario = Usuario::create([
-                    'nombre' => $googleUser->getName(),
-                    'email' => $googleUser->getEmail(),
-                    'google_id' => $googleUser->getId(),
-                    'rol' => 1,
-                    'estado' => 'activo'
+                    'nombre'               => $googleUser->getName(),
+                    'email'                => $googleUser->getEmail(),
+                    'google_id'            => $googleUser->getId(),
+                    'google_refresh_token' => $googleUser->refreshToken,
+                    'rol'                  => 1,
+                    'estado'               => 'activo',
                 ]);
 
                 Perfil::create([
                     'usuario_id' => $usuario->id,
-                    'bio' => 'Estudiante en la plataforma.',
-                    'carrera' => 'Por definir',
-                    'ciclo' => 1,
-                    'foto_url' => $googleUser->getAvatar()
+                    'bio'        => 'Estudiante en la plataforma.',
+                    'carrera'    => 'Por definir',
+                    'ciclo'      => 1,
+                    'foto_url'   => $googleUser->getAvatar(),
                 ]);
             } else {
-                if (empty($usuario->google_id)) {
-                    $usuario->update([
-                        'google_id' => $googleUser->getId()
-                    ]);
-                }
+                // Actualizar siempre el refresh_token (Google lo regenera en cada consent)
+                $updates = [];
+                if (empty($usuario->google_id))            $updates['google_id']            = $googleUser->getId();
+                if (!empty($googleUser->refreshToken))     $updates['google_refresh_token'] = $googleUser->refreshToken;
+                if (!empty($updates))                      $usuario->update($updates);
             }
 
             Auth::login($usuario);
 
             $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173');
+            $isNew = $isNuevo ? '&is_new=1' : '';
 
-            return redirect()->away("{$frontendUrl}/auth/callback?token={$googleUser->token}");
+            return redirect()->away("{$frontendUrl}/auth/callback?token={$googleUser->token}{$isNew}");
 
         } catch (Exception $e) {
             return response()->json([
@@ -71,45 +72,33 @@ class AuthController extends Controller
         }
     }
 
-    // CORRECCIÓN AQUÍ: Recibimos el Request para extraer las cabeceras de la API
     public function usuario(Request $request)
     {
-        try {
-            // 1. Extraer el token Bearer que el Frontend envía en 'Authorization'
-            $token = $request->bearerToken();
+        // El middleware VerificarTokenGoogle ya validó el token e inyectó el usuario
+        $usuario = $request->attributes->get('usuario_auth');
 
-            if (!$token) {
-                return response()->json([
-                    'error' => 'No se proporcionó un token de autenticación'
-                ], 401);
-            }
+        return response()->json([
+            'id'     => $usuario->id,
+            'nombre' => $usuario->nombre,
+            'email'  => $usuario->email,
+            'rol'    => $usuario->rol,
+            'estado' => $usuario->estado,
+        ]);
+    }
 
-            // 2. Preguntar a Google de manera stateless a quién le pertenece este token
-            $googleUser = Socialite::driver('google')->stateless()->userFromToken($token);
+    public function actualizarRol(Request $request)
+    {
+        $request->validate(['rol' => 'required|in:1,2']);
 
-            // 3. Buscar al usuario en la base de datos local usando el email verificado por Google
-            $usuario = Usuario::where('email', $googleUser->getEmail())->first();
+        $usuario = $request->attributes->get('usuario_auth');
+        $usuario->update(['rol' => $request->rol]);
 
-            if (!$usuario) {
-                return response()->json([
-                    'error' => 'Usuario no encontrado en el sistema'
-                ], 44);
-            }
-
-            // 4. Retornar los datos limpios en formato JSON
-            return response()->json([
-                'id' => $usuario->id,
-                'nombre' => $usuario->nombre,
-                'email' => $usuario->email,
-                'rol' => $usuario->rol,
-                'estado' => $usuario->estado
-            ]);
-
-        } catch (Exception $e) {
-            return response()->json([
-                'error' => 'Token inválido o expirado',
-                'detalles' => $e->getMessage()
-            ], 401);
-        }
+        return response()->json([
+            'id'     => $usuario->id,
+            'nombre' => $usuario->nombre,
+            'email'  => $usuario->email,
+            'rol'    => $usuario->rol,
+            'estado' => $usuario->estado,
+        ]);
     }
 }
