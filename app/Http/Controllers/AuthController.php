@@ -57,17 +57,11 @@ class AuthController extends Controller
                 }
             }
 
-            // Mantenemos esto por si alguna otra vista web local requiere la persistencia rápida
             Auth::login($usuario);
 
-            return response()->json([
-                'id' => $usuario->id,
-                'nombre' => $usuario->nombre,
-                'email' => $usuario->email,
-                'rol' => $usuario->rol,
-                'estado' => $usuario->estado,
-                'accessToken' => $googleUser->token
-            ]);
+            $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173');
+
+            return redirect()->away("{$frontendUrl}/auth/callback?token={$googleUser->token}");
 
         } catch (Exception $e) {
             return response()->json([
