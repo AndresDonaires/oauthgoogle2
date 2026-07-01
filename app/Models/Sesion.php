@@ -17,6 +17,7 @@ class Sesion extends Model
         'hora_fin',
         'estado',
         'observaciones',
+        'link_meet',
         'google_calendar_event_id',
     ];
 

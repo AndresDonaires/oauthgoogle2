@@ -6,6 +6,7 @@ use App\Models\Sesion;
 use App\Models\Usuario;
 use App\Services\GoogleCalendarService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 class SesionController extends Controller
@@ -34,21 +35,21 @@ class SesionController extends Controller
     {
         try {
             $request->validate([
-                'mentor_id' => 'required|exists:usuarios,id',
-                'aprendiz_id' => 'required|exists:usuarios,id',
-                'fecha' => 'required|date',
-                'hora_inicio' => 'required',
-                'hora_fin' => 'required',
-                'estado' => 'required|in:pendiente,confirmada,completada,cancelada',
-                'observaciones' => 'nullable|string|max:500'
+                'mentor_id'     => 'required|exists:usuarios,id',
+                'aprendiz_id'   => 'required|exists:usuarios,id',
+                'fecha'         => 'required|date',
+                'hora_inicio'   => 'required',
+                'hora_fin'      => 'required',
+                'observaciones' => 'nullable|string|max:500',
             ]);
         } catch (ValidationException $e) {
             return response()->json(['mensaje' => 'Error de validación', 'errores' => $e->errors()], 422);
         }
 
+        // Solo sesiones activas (pendiente o confirmada) bloquean el horario
         $conflicto = Sesion::where('mentor_id', $request->mentor_id)
             ->where('fecha', $request->fecha)
-            ->where('estado', '!=', 'cancelada')
+            ->whereIn('estado', ['pendiente', 'confirmada'])
             ->where(function ($query) use ($request) {
                 $query->where('hora_inicio', '<', $request->hora_fin)
                       ->where('hora_fin', '>', $request->hora_inicio);
@@ -56,16 +57,16 @@ class SesionController extends Controller
 
         if ($conflicto) {
             return response()->json(['mensaje' => 'El mentor no está disponible en ese horario.'], 409);
-        }        
+        }
 
         $sesion = Sesion::create([
-            'mentor_id'    => $request->mentor_id,
-            'aprendiz_id'  => $request->aprendiz_id,
-            'fecha'        => $request->fecha,
-            'hora_inicio'  => $request->hora_inicio,
-            'hora_fin'     => $request->hora_fin,
-            'estado'       => $request->estado,
-            'observaciones'=> $request->observaciones,
+            'mentor_id'     => $request->mentor_id,
+            'aprendiz_id'   => $request->aprendiz_id,
+            'fecha'         => $request->fecha,
+            'hora_inicio'   => $request->hora_inicio,
+            'hora_fin'      => $request->hora_fin,
+            'estado'        => 'pendiente', // siempre pendiente al crear
+            'observaciones' => $request->observaciones,
         ]);
 
         // ── Google Calendarr ───────────────────────────────────────────────
@@ -111,7 +112,7 @@ class SesionController extends Controller
 
         $conflicto = Sesion::where('mentor_id', $request->mentor_id)
             ->where('fecha', $request->fecha)
-            ->where('estado', '!=', 'cancelada')
+            ->whereIn('estado', ['pendiente', 'confirmada'])
             ->where('id', '!=', $id)
             ->where(function ($query) use ($request) {
                 $query->where('hora_inicio', '<', $request->hora_fin)
@@ -190,8 +191,64 @@ class SesionController extends Controller
             return response()->json(['mensaje' => 'Solo se pueden confirmar sesiones pendientes'], 422);
         }
 
-        $sesion->estado = 'confirmada';
+        try {
+            $request->validate([
+                'link_meet' => 'required|url',
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json(['mensaje' => 'El link de Meet es requerido y debe ser una URL válida', 'errores' => $e->errors()], 422);
+        }
+
+        $sesion->estado    = 'confirmada';
+        $sesion->link_meet = $request->link_meet;
         $sesion->save();
+
+        // Enviar recordatorio por email al aprendiz y al mentor
+        $aprendiz = Usuario::find($sesion->aprendiz_id);
+        $mentor   = Usuario::find($sesion->mentor_id);
+
+        $fechaFormateada = \Carbon\Carbon::parse($sesion->fecha)->format('d/m/Y');
+        $horaInicio      = substr($sesion->hora_inicio, 0, 5);
+        $horaFin         = substr($sesion->hora_fin, 0, 5);
+
+        $datosBase = [
+            'fecha'         => $fechaFormateada,
+            'hora_inicio'   => $horaInicio,
+            'hora_fin'      => $horaFin,
+            'link_meet'     => $sesion->link_meet,
+            'observaciones' => $sesion->observaciones,
+        ];
+
+        try {
+            // Email al aprendiz
+            if ($aprendiz) {
+                Mail::send('emails.sesion_confirmada', array_merge($datosBase, [
+                    'nombre'       => $aprendiz->nombre,
+                    'mensaje'      => 'Tu sesión de mentoría ha sido confirmada. Aquí tienes todos los detalles:',
+                    'etiqueta_otro'=> 'Mentor',
+                    'nombre_otro'  => $mentor->nombre ?? 'Tu mentor',
+                ]), function ($msg) use ($aprendiz) {
+                    $msg->to($aprendiz->email, $aprendiz->nombre)
+                        ->subject('✅ Sesión confirmada — Plataforma Mentoría');
+                });
+            }
+
+            // Email al mentor
+            if ($mentor) {
+                Mail::send('emails.sesion_confirmada', array_merge($datosBase, [
+                    'nombre'       => $mentor->nombre,
+                    'mensaje'      => 'Has confirmado una sesión de mentoría. Aquí tienes los detalles:',
+                    'etiqueta_otro'=> 'Aprendiz',
+                    'nombre_otro'  => $aprendiz->nombre ?? 'Tu aprendiz',
+                ]), function ($msg) use ($mentor) {
+                    $msg->to($mentor->email, $mentor->nombre)
+                        ->subject('✅ Sesión confirmada — Plataforma Mentoría');
+                });
+            }
+        } catch (\Exception $e) {
+            // El email falla silenciosamente — la sesión ya quedó confirmada
+            \Log::error('Error enviando email de confirmación de sesión: ' . $e->getMessage());
+        }
 
         return response()->json(['mensaje' => 'Sesión confirmada correctamente', 'sesion' => $sesion]);
     }
