@@ -68,7 +68,7 @@ class SesionController extends Controller
             'observaciones'=> $request->observaciones,
         ]);
 
-        // ── Google Calendar ───────────────────────────────────────────────
+        // ── Google Calendarr ───────────────────────────────────────────────
         $aprendiz = $request->attributes->get('usuario_auth');
         $mentor   = Usuario::find($request->mentor_id);
 
