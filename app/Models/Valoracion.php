@@ -18,4 +18,9 @@ class Valoracion extends Model
 
     const CREATED_AT = 'fecha_creacion';
     const UPDATED_AT = null;
+
+    public function aprendiz()
+    {
+        return $this->belongsTo(Usuario::class, 'aprendiz_id');
+    }
 }

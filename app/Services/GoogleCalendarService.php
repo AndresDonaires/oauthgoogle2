@@ -30,10 +30,12 @@ class GoogleCalendarService
     }
 
     // ── Construir el cuerpo del evento ────────────────────────────────────
-    private function buildEventBody(Sesion $sesion, string $mentorNombre, string $mentorEmail): array
+    // $contraparteNombre/$contraparteEmail son los datos de la otra persona
+    // (la que NO es dueña del calendario en el que se crea el evento).
+    private function buildEventBody(Sesion $sesion, string $contraparteNombre, string $contraparteEmail): array
     {
         return [
-            'summary'     => "Sesión de Mentoría con {$mentorNombre}",
+            'summary'     => "Sesión de Mentoría con {$contraparteNombre}",
             'description' => $sesion->observaciones ?? 'Sesión de mentoría agendada en la plataforma.',
             'start'       => [
                 'dateTime' => $sesion->fecha . 'T' . $sesion->hora_inicio,
@@ -44,7 +46,7 @@ class GoogleCalendarService
                 'timeZone' => self::TIMEZONE,
             ],
             'attendees' => [
-                ['email' => $mentorEmail, 'displayName' => $mentorNombre],
+                ['email' => $contraparteEmail, 'displayName' => $contraparteNombre],
             ],
             'reminders' => [
                 'useDefault' => false,
@@ -60,15 +62,15 @@ class GoogleCalendarService
     public function crearEvento(
         string $refreshToken,
         Sesion $sesion,
-        string $mentorNombre,
-        string $mentorEmail
+        string $contraparteNombre,
+        string $contraparteEmail
     ): ?string {
         try {
             $accessToken = $this->getAccessToken($refreshToken);
 
             $response = Http::withToken($accessToken)
                 ->post(self::CALENDAR_URL . '?sendUpdates=all',
-                    $this->buildEventBody($sesion, $mentorNombre, $mentorEmail)
+                    $this->buildEventBody($sesion, $contraparteNombre, $contraparteEmail)
                 );
 
             return $response->successful() ? $response->json('id') : null;
@@ -83,15 +85,15 @@ class GoogleCalendarService
         string $eventId,
         string $refreshToken,
         Sesion $sesion,
-        string $mentorNombre,
-        string $mentorEmail
+        string $contraparteNombre,
+        string $contraparteEmail
     ): void {
         try {
             $accessToken = $this->getAccessToken($refreshToken);
 
             Http::withToken($accessToken)
                 ->put(self::CALENDAR_URL . "/{$eventId}?sendUpdates=all",
-                    $this->buildEventBody($sesion, $mentorNombre, $mentorEmail)
+                    $this->buildEventBody($sesion, $contraparteNombre, $contraparteEmail)
                 );
 
         } catch (Exception) {

@@ -11,15 +11,61 @@ use Illuminate\Validation\ValidationException;
 
 class SesionController extends Controller
 {
+    private function queryMisSesiones($usuario)
+    {
+        return Sesion::where(function ($q) use ($usuario) {
+            $q->where('aprendiz_id', $usuario->id)
+              ->orWhere('mentor_id', $usuario->id);
+        });
+    }
+
     public function index(Request $request)
     {
         $usuario = $request->attributes->get('usuario_auth');
+        $estado  = $request->query('estado');
+        $perPage = 10;
 
-        $sesiones = Sesion::where('aprendiz_id', $usuario->id)
-            ->orWhere('mentor_id', $usuario->id)
-            ->get();
+        // Modo "todas": devuelve el arreglo completo sin paginar, para vistas
+        // que necesitan calcular sus propios agregados (Dashboard, Mis Valoraciones).
+        if ($request->boolean('todas')) {
+            $sesiones = $this->queryMisSesiones($usuario)
+                ->orderByDesc('fecha')
+                ->orderByDesc('hora_inicio')
+                ->get();
 
-        return response()->json($sesiones);
+            return response()->json($sesiones);
+        }
+
+        // Contadores por estado (sobre el total, no solo la página actual)
+        $conteos = $this->queryMisSesiones($usuario)
+            ->selectRaw('estado, count(*) as total')
+            ->groupBy('estado')
+            ->pluck('total', 'estado');
+
+        $contadores = [
+            'todas'      => (int) $conteos->sum(),
+            'pendiente'  => (int) ($conteos['pendiente'] ?? 0),
+            'confirmada' => (int) ($conteos['confirmada'] ?? 0),
+            'completada' => (int) ($conteos['completada'] ?? 0),
+            'cancelada'  => (int) ($conteos['cancelada'] ?? 0),
+        ];
+
+        $query = $this->queryMisSesiones($usuario);
+
+        if ($estado && $estado !== 'todas') {
+            $query->where('estado', $estado);
+        }
+
+        $paginado = $query
+            ->orderByDesc('fecha')
+            ->orderByDesc('hora_inicio')
+            ->paginate($perPage)
+            ->appends($request->query());
+
+        $respuesta = $paginado->toArray();
+        $respuesta['contadores'] = $contadores;
+
+        return response()->json($respuesta);
     }
 
     public function show($id)
@@ -69,20 +115,30 @@ class SesionController extends Controller
             'observaciones' => $request->observaciones,
         ]);
 
-        // ── Google Calendarr ───────────────────────────────────────────────
-        $aprendiz = $request->attributes->get('usuario_auth');
-        $mentor   = Usuario::find($request->mentor_id);
+        // El evento de Google Calendar se crea recién cuando el mentor
+        // confirma la sesión (ver confirmar()), no al agendarla.
 
-        if ($aprendiz->google_refresh_token && $mentor) {
-            $calendar  = new GoogleCalendarService();
-            $eventId   = $calendar->crearEvento(
-                $aprendiz->google_refresh_token,
-                $sesion,
-                $mentor->nombre,
-                $mentor->email
-            );
-            if ($eventId) {
-                $sesion->update(['google_calendar_event_id' => $eventId]);
+        // Avisar por email al mentor de que tiene una nueva solicitud
+        $aprendiz = $request->attributes->get('usuario_auth');
+        $mentor   = Usuario::find($sesion->mentor_id);
+
+        if ($mentor) {
+            try {
+                Mail::send('emails.sesion_solicitada', [
+                    'nombre'         => $mentor->nombre,
+                    'nombre_aprendiz'=> $aprendiz->nombre,
+                    'fecha'          => \Carbon\Carbon::parse($sesion->fecha)->format('d/m/Y'),
+                    'hora_inicio'    => substr($sesion->hora_inicio, 0, 5),
+                    'hora_fin'       => substr($sesion->hora_fin, 0, 5),
+                    'observaciones'  => $sesion->observaciones,
+                    'frontend_url'   => env('FRONTEND_URL', 'http://localhost:5173'),
+                ], function ($msg) use ($mentor) {
+                    $msg->to($mentor->email, $mentor->nombre)
+                        ->subject('🔔 Nueva solicitud de mentoría — Plataforma Mentoría');
+                });
+            } catch (\Exception $e) {
+                // El email falla silenciosamente — la sesión ya quedó creada
+                \Log::error('Error enviando email de nueva solicitud de sesión: ' . $e->getMessage());
             }
         }
 
@@ -134,17 +190,28 @@ class SesionController extends Controller
         ]);
 
         // ── Google Calendar ───────────────────────────────────────────────
+        // Solo sincroniza si la sesión ya tenía evento(s) creado(s) (estaba confirmada).
         $aprendiz = Usuario::find($sesion->aprendiz_id);
         $mentor   = Usuario::find($sesion->mentor_id);
+        $calendar = new GoogleCalendarService();
 
         if ($sesion->google_calendar_event_id && $aprendiz?->google_refresh_token && $mentor) {
-            $calendar = new GoogleCalendarService();
             $calendar->actualizarEvento(
                 $sesion->google_calendar_event_id,
                 $aprendiz->google_refresh_token,
                 $sesion,
                 $mentor->nombre,
                 $mentor->email
+            );
+        }
+
+        if ($sesion->google_calendar_event_id_mentor && $mentor?->google_refresh_token && $aprendiz) {
+            $calendar->actualizarEvento(
+                $sesion->google_calendar_event_id_mentor,
+                $mentor->google_refresh_token,
+                $sesion,
+                $aprendiz->nombre,
+                $aprendiz->email
             );
         }
 
@@ -170,6 +237,28 @@ class SesionController extends Controller
 
         $sesion->estado = 'completada';
         $sesion->save();
+
+        // Avisar por email al aprendiz de que ya puede valorar la sesión
+        $aprendiz = Usuario::find($sesion->aprendiz_id);
+
+        if ($aprendiz) {
+            try {
+                Mail::send('emails.sesion_completada', [
+                    'nombre'        => $aprendiz->nombre,
+                    'nombre_mentor' => $usuario->nombre,
+                    'fecha'         => \Carbon\Carbon::parse($sesion->fecha)->format('d/m/Y'),
+                    'hora_inicio'   => substr($sesion->hora_inicio, 0, 5),
+                    'hora_fin'      => substr($sesion->hora_fin, 0, 5),
+                    'frontend_url'  => env('FRONTEND_URL', 'http://localhost:5173'),
+                ], function ($msg) use ($aprendiz) {
+                    $msg->to($aprendiz->email, $aprendiz->nombre)
+                        ->subject('🎓 Sesión completada — ¡Ya puedes valorarla!');
+                });
+            } catch (\Exception $e) {
+                // El email falla silenciosamente — la sesión ya quedó completada
+                \Log::error('Error enviando email de sesión completada: ' . $e->getMessage());
+            }
+        }
 
         return response()->json(['mensaje' => 'Sesión marcada como completada', 'sesion' => $sesion]);
     }
@@ -203,10 +292,41 @@ class SesionController extends Controller
         $sesion->link_meet = $request->link_meet;
         $sesion->save();
 
-        // Enviar recordatorio por email al aprendiz y al mentor
         $aprendiz = Usuario::find($sesion->aprendiz_id);
         $mentor   = Usuario::find($sesion->mentor_id);
 
+        // ── Google Calendar: agenda el evento en el calendario de ambos ─────
+        $calendar = new GoogleCalendarService();
+
+        if ($aprendiz?->google_refresh_token && $mentor) {
+            $eventIdAprendiz = $calendar->crearEvento(
+                $aprendiz->google_refresh_token,
+                $sesion,
+                $mentor->nombre,
+                $mentor->email
+            );
+            if ($eventIdAprendiz) {
+                $sesion->google_calendar_event_id = $eventIdAprendiz;
+            }
+        }
+
+        if ($mentor?->google_refresh_token && $aprendiz) {
+            $eventIdMentor = $calendar->crearEvento(
+                $mentor->google_refresh_token,
+                $sesion,
+                $aprendiz->nombre,
+                $aprendiz->email
+            );
+            if ($eventIdMentor) {
+                $sesion->google_calendar_event_id_mentor = $eventIdMentor;
+            }
+        }
+
+        if ($sesion->isDirty()) {
+            $sesion->save();
+        }
+
+        // Enviar recordatorio por email al aprendiz y al mentor
         $fechaFormateada = \Carbon\Carbon::parse($sesion->fecha)->format('d/m/Y');
         $horaInicio      = substr($sesion->hora_inicio, 0, 5);
         $horaFin         = substr($sesion->hora_fin, 0, 5);
@@ -266,11 +386,20 @@ class SesionController extends Controller
             return response()->json(['mensaje' => 'No tienes permiso para cancelar esta sesión'], 403);
         }
 
+        try {
+            $request->validate([
+                'motivo' => 'required|string|max:500',
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json(['mensaje' => 'El motivo de cancelación es requerido', 'errores' => $e->errors()], 422);
+        }
+
         // ── Google Calendar ───────────────────────────────────────────────
+        $calendar = new GoogleCalendarService();
+
         if ($sesion->google_calendar_event_id) {
             $aprendiz = Usuario::find($sesion->aprendiz_id);
             if ($aprendiz?->google_refresh_token) {
-                $calendar = new GoogleCalendarService();
                 $calendar->eliminarEvento(
                     $sesion->google_calendar_event_id,
                     $aprendiz->google_refresh_token
@@ -278,8 +407,71 @@ class SesionController extends Controller
             }
         }
 
-        $sesion->estado = 'cancelada';
+        if ($sesion->google_calendar_event_id_mentor) {
+            $mentor = Usuario::find($sesion->mentor_id);
+            if ($mentor?->google_refresh_token) {
+                $calendar->eliminarEvento(
+                    $sesion->google_calendar_event_id_mentor,
+                    $mentor->google_refresh_token
+                );
+            }
+        }
+
+        $sesion->estado             = 'cancelada';
+        $sesion->motivo_cancelacion = $request->motivo;
         $sesion->save();
+
+        // Enviar notificación por email al aprendiz y al mentor
+        $aprendiz = Usuario::find($sesion->aprendiz_id);
+        $mentor   = Usuario::find($sesion->mentor_id);
+        $canceladoPorAprendiz = $sesion->aprendiz_id === $usuario->id;
+
+        $fechaFormateada = \Carbon\Carbon::parse($sesion->fecha)->format('d/m/Y');
+        $horaInicio      = substr($sesion->hora_inicio, 0, 5);
+        $horaFin         = substr($sesion->hora_fin, 0, 5);
+
+        $datosBase = [
+            'fecha'         => $fechaFormateada,
+            'hora_inicio'   => $horaInicio,
+            'hora_fin'      => $horaFin,
+            'observaciones' => $sesion->observaciones,
+            'motivo'        => $sesion->motivo_cancelacion,
+        ];
+
+        try {
+            // Email al aprendiz
+            if ($aprendiz) {
+                Mail::send('emails.sesion_cancelada', array_merge($datosBase, [
+                    'nombre'       => $aprendiz->nombre,
+                    'mensaje'      => $canceladoPorAprendiz
+                        ? 'Has cancelado tu sesión de mentoría. Aquí tienes los detalles:'
+                        : 'El mentor ha cancelado la sesión programada contigo. Aquí tienes los detalles:',
+                    'etiqueta_otro'=> 'Mentor',
+                    'nombre_otro'  => $mentor->nombre ?? 'Tu mentor',
+                ]), function ($msg) use ($aprendiz) {
+                    $msg->to($aprendiz->email, $aprendiz->nombre)
+                        ->subject('❌ Sesión cancelada — Plataforma Mentoría');
+                });
+            }
+
+            // Email al mentor
+            if ($mentor) {
+                Mail::send('emails.sesion_cancelada', array_merge($datosBase, [
+                    'nombre'       => $mentor->nombre,
+                    'mensaje'      => $canceladoPorAprendiz
+                        ? 'El aprendiz ha cancelado la sesión programada contigo. Aquí tienes los detalles:'
+                        : 'Has cancelado la sesión de mentoría. Aquí tienes los detalles:',
+                    'etiqueta_otro'=> 'Aprendiz',
+                    'nombre_otro'  => $aprendiz->nombre ?? 'Tu aprendiz',
+                ]), function ($msg) use ($mentor) {
+                    $msg->to($mentor->email, $mentor->nombre)
+                        ->subject('❌ Sesión cancelada — Plataforma Mentoría');
+                });
+            }
+        } catch (\Exception $e) {
+            // El email falla silenciosamente — la sesión ya quedó cancelada
+            \Log::error('Error enviando email de cancelación de sesión: ' . $e->getMessage());
+        }
 
         return response()->json(['mensaje' => 'Sesión cancelada correctamente', 'sesion' => $sesion]);
     }

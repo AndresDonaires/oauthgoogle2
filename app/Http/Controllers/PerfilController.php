@@ -3,13 +3,18 @@
 namespace App\Http\Controllers;
 
 use App\Models\Perfil;
+use App\Models\Valoracion;
 use Illuminate\Http\Request;
 
 class PerfilController extends Controller
 {
     public function show($id)
     {
-        $perfil = Perfil::where('usuario_id', $id)->first();
+        $perfil = Perfil::with('usuario')
+            ->withAvg('valoraciones', 'calificacion')
+            ->withCount('valoraciones')
+            ->where('usuario_id', $id)
+            ->first();
 
         if (!$perfil) {
             return response()->json([
@@ -18,6 +23,18 @@ class PerfilController extends Controller
         }
 
         return response()->json($perfil);
+    }
+
+    // Listado público de valoraciones/reseñas recibidas por un mentor
+    public function valoraciones($id)
+    {
+        $valoraciones = Valoracion::with('aprendiz:id,nombre')
+            ->where('mentor_id', $id)
+            ->whereNotNull('comentario')
+            ->orderByDesc('fecha_creacion')
+            ->paginate(10);
+
+        return response()->json($valoraciones);
     }
 
     public function store(Request $request)

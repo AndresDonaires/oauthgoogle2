@@ -18,7 +18,9 @@ class Sesion extends Model
         'estado',
         'observaciones',
         'link_meet',
+        'motivo_cancelacion',
         'google_calendar_event_id',
+        'google_calendar_event_id_mentor',
     ];
 
     const CREATED_AT = 'fecha_creacion';
