@@ -29,6 +29,7 @@ class SesionController extends Controller
         // que necesitan calcular sus propios agregados (Dashboard, Mis Valoraciones).
         if ($request->boolean('todas')) {
             $sesiones = $this->queryMisSesiones($usuario)
+                ->with(['aprendiz:id,nombre', 'mentor:id,nombre'])
                 ->orderByDesc('fecha')
                 ->orderByDesc('hora_inicio')
                 ->get();
@@ -50,7 +51,8 @@ class SesionController extends Controller
             'cancelada'  => (int) ($conteos['cancelada'] ?? 0),
         ];
 
-        $query = $this->queryMisSesiones($usuario);
+        $query = $this->queryMisSesiones($usuario)
+            ->with(['aprendiz:id,nombre', 'mentor:id,nombre']);
 
         if ($estado && $estado !== 'todas') {
             $query->where('estado', $estado);
@@ -70,7 +72,7 @@ class SesionController extends Controller
 
     public function show($id)
     {
-        $sesion = Sesion::find($id);
+        $sesion = Sesion::with(['aprendiz:id,nombre', 'mentor:id,nombre'])->find($id);
         if (!$sesion) {
             return response()->json(['mensaje' => 'Sesión no encontrada'], 404);
         }
