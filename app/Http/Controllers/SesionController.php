@@ -200,6 +200,8 @@ class SesionController extends Controller
                 $sesion->google_calendar_event_id,
                 $aprendiz->google_refresh_token,
                 $sesion,
+                $aprendiz->nombre,
+                $mentor->nombre,
                 $mentor->nombre,
                 $mentor->email
             );
@@ -210,6 +212,8 @@ class SesionController extends Controller
                 $sesion->google_calendar_event_id_mentor,
                 $mentor->google_refresh_token,
                 $sesion,
+                $aprendiz->nombre,
+                $mentor->nombre,
                 $aprendiz->nombre,
                 $aprendiz->email
             );
@@ -295,30 +299,36 @@ class SesionController extends Controller
         $aprendiz = Usuario::find($sesion->aprendiz_id);
         $mentor   = Usuario::find($sesion->mentor_id);
 
-        // ── Google Calendar: agenda el evento en el calendario de ambos ─────
+        // ── Google Calendar: se crea el evento UNA sola vez (con el token de
+        // quien lo tenga disponible) y se invita a la contraparte como asistente.
+        // Google Calendar copia automáticamente el evento al calendario del
+        // invitado, así que crearlo también desde el otro lado duplicaría el
+        // evento (2 recordatorios) en ambos calendarios.
         $calendar = new GoogleCalendarService();
 
         if ($aprendiz?->google_refresh_token && $mentor) {
-            $eventIdAprendiz = $calendar->crearEvento(
+            $eventId = $calendar->crearEvento(
                 $aprendiz->google_refresh_token,
                 $sesion,
+                $aprendiz->nombre,
+                $mentor->nombre,
                 $mentor->nombre,
                 $mentor->email
             );
-            if ($eventIdAprendiz) {
-                $sesion->google_calendar_event_id = $eventIdAprendiz;
+            if ($eventId) {
+                $sesion->google_calendar_event_id = $eventId;
             }
-        }
-
-        if ($mentor?->google_refresh_token && $aprendiz) {
-            $eventIdMentor = $calendar->crearEvento(
+        } elseif ($mentor?->google_refresh_token && $aprendiz) {
+            $eventId = $calendar->crearEvento(
                 $mentor->google_refresh_token,
                 $sesion,
                 $aprendiz->nombre,
+                $mentor->nombre,
+                $aprendiz->nombre,
                 $aprendiz->email
             );
-            if ($eventIdMentor) {
-                $sesion->google_calendar_event_id_mentor = $eventIdMentor;
+            if ($eventId) {
+                $sesion->google_calendar_event_id_mentor = $eventId;
             }
         }
 

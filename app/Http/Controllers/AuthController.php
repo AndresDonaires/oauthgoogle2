@@ -14,7 +14,8 @@ class AuthController extends Controller
     public function redirect()
     {
         return Socialite::driver('google')
-            ->scopes(['openid', 'profile', 'email'])
+            ->scopes(['openid', 'profile', 'email', 'https://www.googleapis.com/auth/calendar.events'])
+            ->with(['access_type' => 'offline', 'prompt' => 'consent'])
             ->stateless()
             ->redirect();
     }
